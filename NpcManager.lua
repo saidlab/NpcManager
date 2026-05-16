@@ -130,7 +130,7 @@ function NpcManager:setEvent(Name: string, Function: () -> ())
 end
 
 -- Spawns one or all of the NPCs specified in the configuration.
-function NpcManager:spawnNpc(ID: number | "all")
+function NpcManager:spawnNpc(ID)
 	if not self._loaded then return end
 	if not ID then
 		return warn("[NpcManager]: Spawn ID not specified.")
@@ -138,7 +138,6 @@ function NpcManager:spawnNpc(ID: number | "all")
 
 	local config = self._config
 
-	-- Spawn all configured NPCs
 	if type(ID) ~= "number" and ID == "all" then
 		for npcId in pairs(config) do
 			self:spawnNpc(npcId)
@@ -146,7 +145,10 @@ function NpcManager:spawnNpc(ID: number | "all")
 		return self._npcs
 	end
 
-	-- Prevent spawning the same ID multiple times
+	if self._npcs[ID] and not self._npcs[ID].Parent then
+		self._npcs[ID] = nil
+	end
+
 	if self._npcs[ID] and self._npcs[ID].Parent then
 		warn(string.format("[NpcManager]: NPC with ID %d is already spawned. Use destroyNpc(%d) first.", ID, ID))
 		return self._npcs[ID]
@@ -162,26 +164,26 @@ function NpcManager:spawnNpc(ID: number | "all")
 		return warn(string.format("[NpcManager]: Model not found for NPC '%s'.", npcData.Name or ID))
 	end
 
-	-- Clone the template and store it
+	if not modelTemplate:FindFirstChild("Humanoid") then
+		warn(string.format("[NpcManager]: Template for '%s' has no Humanoid.", npcData.Name or ID))
+		return nil
+	end
+
 	local clone = modelTemplate:Clone()
-	clone:SetAttribute("NpcId", ID)  -- Store ID for later cleanup
+	clone:SetAttribute("NpcId", ID)
 	self._npcs[ID] = clone
-	npcData.Model = clone
 	clone.Parent = workspace
 
-	-- Apply properties, events, and optional behaviors
 	self:_applyBaseProperties(clone, npcData)
 	self:_applyEvents(clone, npcData)
 
-	-- Start patrol if waypoints are defined
 	if npcData.Waypoints and #npcData.Waypoints > 0 then
 		self._waypoints[ID] = npcData.Waypoints
 		self:_startPatrol(clone, npcData.Waypoints)
 	end
 
-	-- Trigger OnSpawn callback if registered
-	if npcData.Events and npcData.Events["OnSpawn"] and self._events["OnSpawn"] then
-		self._events["OnSpawn"](clone)
+	if npcData.Events and npcData.Events.OnSpawn and self._events.OnSpawn then
+		self._events.OnSpawn(clone, npcData)
 	end
 
 	return clone
@@ -325,7 +327,7 @@ function NpcManager:_getRangeValue(value)
 end
 
 -- Applies basic properties (Name, WalkSpeed, Health, Size, Position) to the Clone.
-function NpcManager:_applyBaseProperties(Clone: Model, Data)
+function NpcManager:_applyBaseProperties(Clone, Data)
 	local humanoid = Clone:FindFirstChild("Humanoid")
 	if Data.Name then Clone.Name = Data.Name end
 	if humanoid and Data.WalkSpeed then
@@ -336,7 +338,22 @@ function NpcManager:_applyBaseProperties(Clone: Model, Data)
 		humanoid.Health = Data.Health
 	end
 	if Data.Size then
-		Clone:ScaleTo(self:_getRangeValue(Data.Size))
+		local scale = self:_getRangeValue(Data.Size)
+		local primary = Clone.PrimaryPart
+		if primary then
+			local oldCFrame = primary.CFrame
+			for _, part in ipairs(Clone:GetDescendants()) do
+				if part:IsA("BasePart") then
+					local newSize = part.Size * scale
+					local offset = (part.Position - primary.Position) * scale
+					part.Size = newSize
+					part.Position = primary.Position + offset
+				end
+			end
+			Clone:PivotTo(oldCFrame)
+		else
+			warn("[NpcManager]: Cannot scale NPC without PrimaryPart")
+		end
 	end
 	if Data.Position then
 		local pos = Data.Position
@@ -351,8 +368,10 @@ function NpcManager:_startPatrol(model, waypoints)
 	if not humanoid or #waypoints == 0 then return end
 
 	local currentWaypointIndex = 1
-	local waypointPath = {}  -- Will hold the computed path waypoints
+	local waypointPath = {}
 	local currentPathIndex = 1
+	local retryCount = 0
+	local MAX_RETRIES = 5
 
 	local function moveToNextPathPoint()
 		if currentPathIndex <= #waypointPath then
@@ -369,27 +388,29 @@ function NpcManager:_startPatrol(model, waypoints)
 		if path.Status == Enum.PathStatus.Success then
 			waypointPath = path:GetWaypoints()
 			currentPathIndex = 1
+			retryCount = 0
 			moveToNextPathPoint()
 		else
-			-- If path computation fails, try again shortly (optional)
-			task.wait(0.5)
-			computeAndStartPath()
+			retryCount = retryCount + 1
+			if retryCount <= MAX_RETRIES then
+				task.wait(0.5)
+				computeAndStartPath()
+			else
+				warn(string.format("[NpcManager]: Failed to compute path for %s after %d attempts", model.Name, MAX_RETRIES))
+			end
 		end
 	end
 
-	-- Start the first patrol leg
 	computeAndStartPath()
 
 	local connection
 	connection = humanoid.MoveToFinished:Connect(function(reached)
 		if not reached then return end
 
-		-- Advance within the computed path
-		currentPathIndex += 1
+		currentPathIndex = currentPathIndex + 1
 		if currentPathIndex <= #waypointPath then
 			moveToNextPathPoint()
 		else
-			-- Reached the final waypoint; move to the next configured waypoint
 			currentWaypointIndex = currentWaypointIndex % #waypoints + 1
 			computeAndStartPath()
 		end
@@ -403,7 +424,6 @@ end
 -- - Calls the user's OnDied callback (if registered)
 -- - Cleans up connections and removes the model from the world
 function NpcManager:_handleDeath(Clone, Data)
-	-- Drop loot if a "Loot" folder is defined and Data contains loot entries
 	if Data.Loot and self._folders["Loot"] then
 		local lootFolder = self._folders["Loot"]
 		local dropPos = Clone.PrimaryPart and Clone.PrimaryPart.Position or Clone:GetPivot().Position
@@ -419,27 +439,22 @@ function NpcManager:_handleDeath(Clone, Data)
 		end
 	end
 
-	-- Fire the OnDied callback before destroying the model, if requested and registered
 	if Data.Events and Data.Events.OnDied and self._events.OnDied then
-		self._events.OnDied(Clone)
+		self._events.OnDied(Clone, Data)
 	end
 
-	-- Disconnect patrol loop
 	if self._patrolConnections[Clone] then
 		self._patrolConnections[Clone]:Disconnect()
 		self._patrolConnections[Clone] = nil
 	end
 
-	-- Remove custom event triggers
 	self._npcs_events[Clone] = nil
 
-	-- Retrieve the NPC ID from the attribute and clean up the reference
 	local npcId = Clone:GetAttribute("NpcId")
 	if npcId and self._npcs[npcId] == Clone then
 		self._npcs[npcId] = nil
 	end
 
-	-- Finally destroy the model
 	Clone:Destroy()
 end
 
