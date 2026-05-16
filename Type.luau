@@ -7,18 +7,24 @@ export type AnimationType = {
 	Jump: string?,
 }
 
-type EventType = {
+export type RangeType = number | {number}
+
+export type LootEntry = {
+	Item: string,
+	Chance: number?,
+}
+
+export type EventsType = {
 	OnSpawn: boolean?,
 	OnDied: boolean?,
 	OnMove: boolean?,
 	OnDamage: boolean?,
-	[string]: () -> ()?
+	[string]: boolean | ((npcData: any) -> boolean)?,
 }
-
-export type RangeType = number | {number}
 
 export type NPCData = {
 	Name: string,
+	Model: string | Instance,
 	Age: number?,
 	Profession: string?,
 	PovView: number?,
@@ -26,12 +32,13 @@ export type NPCData = {
 	Health: number?,
 	Size: RangeType?,
 	WalkSpeed: RangeType?,
-	Position: Vector3,
+	Position: Vector3 | CFrame,
 	Tool: string?,
 	Tools: {string}?,
 	Animations: AnimationType?,
-	Events: {EventType}?,
-	Model: string,
+	Events: EventsType?,
+	Waypoints: {Vector3}?,
+	Loot: {LootEntry}?,
 }
 
 export type Config = {[number]: NPCData}
