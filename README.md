@@ -51,14 +51,14 @@ local Module = NpcManager.Init({
 })
 ```
 
-Configurando as pastas dos acessorios e etc:
+Configuring the folders for accessories and other items:
 ```lua
 Module:setFolder("Models", game.ReplicatedStorage.Models)
 Module:setFolder("Animations", game.ReplicatedStorage.Animations)
 Module:setFolder("Loot", game.ReplicatedStorage.LootItems)
 ```
 
-Configurando os Eventos do NPC:
+Configuring NPC Events:
 ```lua
 Module:setEvent("OnSpawn", function(npc)
     print(npc.Name .. " spawned!")
@@ -75,12 +75,12 @@ Module:setEvent("PlayerNearby", function(isNearby, npcData)
 end)
 ```
 
-Spawnando o NPC pelo ID:
+Spawning the NPC by ID:
 ```lua
 local myNpc = Module:spawnNpc(1)
 ```
 
-Spawnando todos os NPCs:
+Spawning all NPCs:
 ```lua
 Module:spawnNpc("all")
 ```
