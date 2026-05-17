@@ -1,6 +1,5 @@
 --[[
 				NPC Manager Module
-
 	Main script exemple:
 		local NpcManager = require( MODULE_LOCATION_HERE )
 		local Module = NpcManager.Init({
