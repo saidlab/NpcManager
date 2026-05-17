@@ -1,16 +1,14 @@
 --[[
-	NPC Manager Module
-	Author: S_aid
-	Description: Manages the creation, configuration, and events of NPCs.
-	
-	Example of use:
+				NPC Manager Module
+
+	Main script exemple:
 		local NpcManager = require( MODULE_LOCATION_HERE )
 		local Module = NpcManager.Init({
 			[1] = {
 				Name = "Dummy",
 				Model = "Default",
 				Health = 100,
-				WalkSpeed = 16,
+				WalkSpeed = 16, 
 				Animations = {
 					Idle = "idle_anim"
 				},
@@ -62,14 +60,12 @@
 		-- Module:Destroy()
 ]]
 
--- Roblox Services
 local RunService = game:GetService("RunService")
 local PathfindingService = game:GetService("PathfindingService")
 
 local NpcManager = {}
 NpcManager.__index = NpcManager
 
--- External type definitions
 local Types = require("@self/Type")
 
 -- Function to initialize the NPC management module
@@ -77,18 +73,17 @@ function NpcManager.Init(Config: Types.Config)
 	local self = setmetatable({}, NpcManager)
 
 	if not Config then
-		warn("[NpcManager]: No configuration was specified. No NPCs will be managed.")
+		warn("[NpcManager]: Missing config. No NPCs will be managed.")
 		return self
 	end
 
-	-- Internal properties
 	self._config = Config
 	self._events = {}
 	self._folders = {}
 	self._npcs = {}
 	self._npcs_events = {}
 	self._waypoints = {}
-	self._patrolConnections = {}
+	self._pConnections = {}
 	self._loaded = true
 
 	-- Single heartbeat loop to continuously check all custom events for all NPCs
@@ -100,8 +95,7 @@ function NpcManager.Init(Config: Types.Config)
 					triggerFunc()
 				end
 			else
-				-- Clean up entries for destroyed or removed NPCs
-				self._npcs_events[clone] = nil
+				self._npcs_events[clone] = nil -- Clean up entries for destroyed or removed NPCs
 			end
 		end
 	end)
@@ -119,8 +113,7 @@ function NpcManager:setFolder(Name: string, Path: Instance | Folder)
 	self._folders[Name] = Path
 end
 
--- Registers a callback function for a named event.
--- These callbacks will be called when the corresponding event occurs.
+-- Registers a callback function
 function NpcManager:setEvent(Name: string, Function: () -> ())
 	if not self._loaded then return end
 	if not Name or not Function then
@@ -130,7 +123,7 @@ function NpcManager:setEvent(Name: string, Function: () -> ())
 end
 
 -- Spawns one or all of the NPCs specified in the configuration.
-function NpcManager:spawnNpc(ID)
+function NpcManager:spawnNpc(ID: number | string)
 	if not self._loaded then return end
 	if not ID then
 		return warn("[NpcManager]: Spawn ID not specified.")
@@ -150,43 +143,42 @@ function NpcManager:spawnNpc(ID)
 	end
 
 	if self._npcs[ID] and self._npcs[ID].Parent then
-		warn(string.format("[NpcManager]: NPC with ID %d is already spawned. Use destroyNpc(%d) first.", ID, ID))
+		warn(`[NpcManager]: NPC with ID '{ID}' is already spawned. Use destroyNpc({ID}) first.`)
 		return self._npcs[ID]
 	end
 
 	local npcData = config[ID]
 	if not npcData then
-		return warn(string.format("[NpcManager]: ID %d not found in configuration.", ID))
+		return warn(`[NpcManager]: ID '{ID}' not found in configuration.`)
 	end
 
 	local modelTemplate = self:_getModel(npcData)
 	if not modelTemplate then
-		return warn(string.format("[NpcManager]: Model not found for NPC '%s'.", npcData.Name or ID))
+		return warn(`[NpcManager]: Model not found for NPC '{npcData.Name}'.`)
 	end
 
 	if not modelTemplate:FindFirstChild("Humanoid") then
-		warn(string.format("[NpcManager]: Template for '%s' has no Humanoid.", npcData.Name or ID))
-		return nil
+		return warn(`[NpcManager]: Template for '{npcData.Name}' has no Humanoid.`)
 	end
 
-	local clone = modelTemplate:Clone()
-	clone:SetAttribute("NpcId", ID)
-	self._npcs[ID] = clone
-	clone.Parent = workspace
+	local cloneModel = modelTemplate:Clone()
+	cloneModel.Parent = workspace
+	cloneModel:SetAttribute("NpcId", ID)
+	self._npcs[ID] = cloneModel
 
-	self:_applyBaseProperties(clone, npcData)
-	self:_applyEvents(clone, npcData)
+	self:_applyBaseProperties(cloneModel, npcData)
+	self:_applyEvents(cloneModel, npcData)
 
 	if npcData.Waypoints and #npcData.Waypoints > 0 then
 		self._waypoints[ID] = npcData.Waypoints
-		self:_startPatrol(clone, npcData.Waypoints)
+		self:_startPatrol(cloneModel, npcData.Waypoints)
 	end
 
 	if npcData.Events and npcData.Events.OnSpawn and self._events.OnSpawn then
-		self._events.OnSpawn(clone, npcData)
+		self._events.OnSpawn(cloneModel, npcData)
 	end
 
-	return clone
+	return cloneModel
 end
 
 -- Removes a spawned NPC by its ID and cleans up all associated resources.
@@ -196,15 +188,13 @@ function NpcManager:destroyNpc(ID: number)
 	if not npc then return end
 
 	-- Disconnect patrol loop
-	if self._patrolConnections[npc] then
-		self._patrolConnections[npc]:Disconnect()
-		self._patrolConnections[npc] = nil
+	if self._pConnections[npc] then
+		self._pConnections[npc]:Disconnect()
+		self._pConnections[npc] = nil
 	end
-
-	-- Remove custom event triggers
-	self._npcs_events[npc] = nil
-
-	-- Destroy the model and clear the reference
+	
+	self._npcs_events[npc] = nil -- Remove custom event triggers
+	
 	npc:Destroy()
 	self._npcs[ID] = nil
 end
@@ -217,19 +207,17 @@ function NpcManager:Destroy()
 		self._heartbeatConnection = nil
 	end
 
-	-- Destroy all spawned NPCs
 	for _, npc in pairs(self._npcs) do
 		npc:Destroy()
 	end
 
-	-- Clear all tables to free memory
 	self._config = nil
 	self._events = nil
 	self._folders = nil
 	self._npcs = nil
 	self._npcs_events = nil
 	self._waypoints = nil
-	self._patrolConnections = nil
+	self._pConnections = nil
 	self._loaded = false
 end
 
@@ -238,9 +226,7 @@ local function isEmpty(tbl)
 	return not tbl or next(tbl) == nil
 end
 
--- Connects standard and custom events to the NPC.
--- Standard events are wired directly to Roblox signals.
--- Custom events are stored as trigger functions called every Heartbeat.
+-- Custom events to the NPC and connects.
 function NpcManager:_applyEvents(Clone: Model, Data)
 	local humanoid = Clone:FindFirstChild("Humanoid")
 	if not humanoid then return end
@@ -250,15 +236,13 @@ function NpcManager:_applyEvents(Clone: Model, Data)
 
 	if isEmpty(npcEvents) then return end
 
-	-- Mapping of standard event names to Humanoid signals (except OnDied, handled in _handleDeath)
 	local defaultEventMap = {
-		OnMove = "Running",
+		OnMove = "Running", 
 		OnDamage = "HealthChanged",
 	}
 
-	local customEventTriggers = {}
+	local customTriggers = {}
 
-	-- Always connect the Died signal for internal cleanup (loot, removal, etc.)
 	humanoid.Died:Connect(function()
 		self:_handleDeath(Clone, Data)
 	end)
@@ -273,48 +257,40 @@ function NpcManager:_applyEvents(Clone: Model, Data)
 					callback(Clone, ...)
 				end)
 			end
-
-		elseif eventName == "OnDied" then
-			-- OnDied is handled inside _handleDeath to ensure proper execution order
-			-- No direct connection needed here; _handleDeath will call the callback
-
 		elseif type(eventValue) == "function" and registeredEvents[eventName] then
 			-- Custom event: store a trigger function that will be evaluated every frame
 			local filterFunc = eventValue
-			local registeredCallback = registeredEvents[eventName]
-			customEventTriggers[eventName] = function()
-				local result = filterFunc(Data)
-				if result then
-					registeredCallback(result, Data)
+			local getCallback = registeredEvents[eventName]
+			customTriggers[eventName] = function()
+				local Result = filterFunc(Data)
+				if Result then
+					getCallback(Result, Data)
 				end
 			end
 		end
 	end
 
 	-- Store custom triggers if any were defined
-	if next(customEventTriggers) then
-		self._npcs_events[Clone] = customEventTriggers
+	if next(customTriggers) then
+		self._npcs_events[Clone] = customTriggers
 	end
 end
 
 -- Retrieves the NPC model from the configuration.
--- If Data.Model is a string, searches in the previously registered "Models" folder.
--- Otherwise, assumes it is a direct instance.
 function NpcManager:_getModel(Data)
-	local modelRef = Data.Model
-	if type(modelRef) == "string" then
-		local modelsFolder = self._folders["Models"]
-		if not modelsFolder then
-			warn("[NpcManager]: 'Models' folder not defined. Use setFolder('Models', ...).")
-			return nil
+	local getModel = Data.Model
+	if type(getModel) == "string" then
+		local ModelsFolder = self._folders["Models"]
+		if not ModelsFolder then
+			return warn("[NpcManager]: 'Models' folder not defined. Use setFolder('Models', ...).")
 		end
-		local model = modelsFolder:FindFirstChild(modelRef)
-		if not model then
-			warn(string.format("[NpcManager]: Model '%s' not found in the Models folder.", modelRef))
+		local Model = ModelsFolder:FindFirstChild(getModel)
+		if not Model then
+			return warn(`[NpcManager]: Model {getModel} not found in the Models folder.`)
 		end
-		return model
+		return Model
 	else
-		return modelRef -- Must be a direct instance
+		return getModel
 	end
 end
 
@@ -327,7 +303,7 @@ function NpcManager:_getRangeValue(value)
 end
 
 -- Applies basic properties (Name, WalkSpeed, Health, Size, Position) to the Clone.
-function NpcManager:_applyBaseProperties(Clone, Data)
+function NpcManager:_applyBaseProperties(Clone: Model, Data)
 	local humanoid = Clone:FindFirstChild("Humanoid")
 	if Data.Name then Clone.Name = Data.Name end
 	if humanoid and Data.WalkSpeed then
@@ -355,83 +331,77 @@ function NpcManager:_applyBaseProperties(Clone, Data)
 			warn("[NpcManager]: Cannot scale NPC without PrimaryPart")
 		end
 	end
-	if Data.Position then
-		local pos = Data.Position
-		Clone:PivotTo(typeof(pos) == "Vector3" and CFrame.new(pos) or pos)
+	
+	local getPosition = Data.Position
+	if getPosition then
+		Clone:PivotTo(typeof(getPosition) == "Vector3" and CFrame.new(getPosition) or getPosition)
 	end
 end
 
 -- Starts a patrol loop for the NPC, following the given waypoints.
--- Uses PathfindingService to compute a path and then moves the NPC step by step.
-function NpcManager:_startPatrol(model, waypoints)
-	local humanoid = model:FindFirstChild("Humanoid")
-	if not humanoid or #waypoints == 0 then return end
+function NpcManager:_startPatrol(Model: Model, Waypoints)
+	local humanoid = Model:FindFirstChild("Humanoid")
+	if not humanoid or #Waypoints == 0 then return end
 
-	local currentWaypointIndex = 1
-	local waypointPath = {}
-	local currentPathIndex = 1
-	local retryCount = 0
-	local MAX_RETRIES = 5
+	local wayPath, currentWaypointIndex, PathIndex, retryCount = {}, 1, 1, 0
 
-	local function moveToNextPathPoint()
-		if currentPathIndex <= #waypointPath then
-			local nextPoint = waypointPath[currentPathIndex]
+	local function NextPathPoint()
+		if PathIndex <= #wayPath then
+			local nextPoint = wayPath[PathIndex]
 			humanoid:MoveTo(nextPoint.Position)
 		end
 	end
 
-	local function computeAndStartPath()
-		local target = waypoints[currentWaypointIndex]
+	local function StartPath()
+		local target = Waypoints[currentWaypointIndex]
 		local path = PathfindingService:CreatePath()
-		path:ComputeAsync(model.PrimaryPart.Position, target)
+		path:ComputeAsync(Model.PrimaryPart.Position, target)
 
 		if path.Status == Enum.PathStatus.Success then
-			waypointPath = path:GetWaypoints()
-			currentPathIndex = 1
+			wayPath = path:GetWaypoints()
+			PathIndex = 1
 			retryCount = 0
-			moveToNextPathPoint()
+			NextPathPoint()
 		else
 			retryCount = retryCount + 1
-			if retryCount <= MAX_RETRIES then
+			if retryCount <= 5 then
 				task.wait(0.5)
-				computeAndStartPath()
+				StartPath()
 			else
-				warn(string.format("[NpcManager]: Failed to compute path for %s after %d attempts", model.Name, MAX_RETRIES))
+				return warn(`[NpcManager]: Failed to compute path for {Model.Name} after 5 attempts`)
 			end
 		end
 	end
 
-	computeAndStartPath()
+	StartPath()
 
-	local connection
-	connection = humanoid.MoveToFinished:Connect(function(reached)
+	local Event
+	Event = humanoid.MoveToFinished:Connect(function(reached)
 		if not reached then return end
 
-		currentPathIndex = currentPathIndex + 1
-		if currentPathIndex <= #waypointPath then
-			moveToNextPathPoint()
+		PathIndex = PathIndex + 1
+		if PathIndex <= #wayPath then
+			NextPathPoint()
 		else
-			currentWaypointIndex = currentWaypointIndex % #waypoints + 1
-			computeAndStartPath()
+			currentWaypointIndex = currentWaypointIndex % #Waypoints + 1
+			StartPath()
 		end
 	end)
 
-	self._patrolConnections[model] = connection
+	self._pConnections[Model] = Event
 end
 
--- Handles everything that should happen when an NPC dies:
--- - Drops loot items (if configured)
--- - Calls the user's OnDied callback (if registered)
--- - Cleans up connections and removes the model from the world
-function NpcManager:_handleDeath(Clone, Data)
+-- Handles everything that should happen when an NPC dies.
+function NpcManager:_handleDeath(Clone: Model, Data)
 	if Data.Loot and self._folders["Loot"] then
 		local lootFolder = self._folders["Loot"]
 		local dropPos = Clone.PrimaryPart and Clone.PrimaryPart.Position or Clone:GetPivot().Position
+		
 		for _, lootEntry in ipairs(Data.Loot) do
 			if math.random() <= (lootEntry.Chance or 1) then
-				local item = lootFolder:FindFirstChild(lootEntry.Item)
-				if item then
-					local drop = item:Clone()
+				local getItem = lootFolder:FindFirstChild(lootEntry.Item)
+				if getItem then
+					local drop = getItem:Clone()
 					drop.Parent = workspace
 					drop:PivotTo(CFrame.new(dropPos + Vector3.new(math.random(-2,2), 0, math.random(-2,2))))
 				end
@@ -443,16 +413,16 @@ function NpcManager:_handleDeath(Clone, Data)
 		self._events.OnDied(Clone, Data)
 	end
 
-	if self._patrolConnections[Clone] then
-		self._patrolConnections[Clone]:Disconnect()
-		self._patrolConnections[Clone] = nil
+	if self._pConnections[Clone] then
+		self._pConnections[Clone]:Disconnect()
+		self._pConnections[Clone] = nil
 	end
 
 	self._npcs_events[Clone] = nil
 
-	local npcId = Clone:GetAttribute("NpcId")
-	if npcId and self._npcs[npcId] == Clone then
-		self._npcs[npcId] = nil
+	local npcID = Clone:GetAttribute("NpcId")
+	if npcID and self._npcs[npcID] == Clone then
+		self._npcs[npcID] = nil
 	end
 
 	Clone:Destroy()
